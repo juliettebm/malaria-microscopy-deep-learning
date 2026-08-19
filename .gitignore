@@ -1,0 +1,35 @@
+# Data (downloaded from NIH — see README)
+data/raw/
+data/processed/
+*.zip
+
+# Trained models / checkpoints / artifacts
+models/
+checkpoints/
+*.pt
+*.pth
+*.bin
+*.safetensors
+
+# Jupyter
+.ipynb_checkpoints/
+*/.ipynb_checkpoints/
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+
+# Secrets — never commit API keys
+.env
+*.key
+secrets.*
