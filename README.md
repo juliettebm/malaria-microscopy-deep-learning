@@ -1,4 +1,4 @@
-# 🩸 Diagnostic du paludisme par deep learning sur frottis sanguin
+# Diagnostic du paludisme par deep learning sur frottis sanguin
 
 [![Python](https://img.shields.io/badge/Python-3.11-blue?logo=python&logoColor=white)](https://www.python.org/)
 [![PyTorch](https://img.shields.io/badge/PyTorch-CNN%20%2B%20transfer%20learning-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
