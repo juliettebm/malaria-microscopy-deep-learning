@@ -83,7 +83,7 @@ Ouvrir et exécuter les notebooks dans l'ordre (01 à 04). Le notebook 02 écrit
 ## Méthodologie
 
 1. **Ingestion et audit qualité** (01) : inventaire des 27 558 images, audit des dimensions/mode, détection de fichiers corrompus et de doublons, balance des classes, échantillon visuel par classe.
-2. **Jeu de données annoté** (02) : split stratifié 70/15/15 (seed fixe), **au niveau de l'image et non du patient** (voir Limites), pipeline de prétraitement (resize, normalisation, augmentation sur le train uniquement), manifestes annotés `train.csv` / `val.csv` / `test.csv`.
+2. **Jeu de données annoté** (02) : split 70/15/15 (seed fixe) **groupé par patient** (`GroupShuffleSplit`, 200 patients : 140 / 30 / 30, l'identifiant étant lu dans le nom de fichier), pipeline de prétraitement (resize, normalisation, augmentation sur le train uniquement), manifestes annotés `train.csv` / `val.csv` / `test.csv`.
 3. **État de l'art et modélisation** (03) : comparaison d'un CNN entraîné from scratch et d'un ResNet18 pré-entraîné (transfer learning), sur un sous-échantillon stratifié de 6 000 images d'entraînement pour un temps de calcul raisonnable en CPU (pas de GPU disponible).
 4. **Évaluation clinique et interprétabilité** (04) : indicateurs cliniques (sensibilité, spécificité, VPP, VPN, ROC-AUC, matrice de confusion) sur le test set jamais vu, cartes de saillance pour l'interprétabilité, simulation de l'effet de la prévalence sur la VPP, discussion de la valeur médicale et opérationnelle.
 
@@ -95,37 +95,37 @@ Ouvrir et exécuter les notebooks dans l'ordre (01 à 04). Le notebook 02 écrit
 
 | Modèle | Paramètres entraînés | Val Accuracy | Val F1 | Temps d'entraînement |
 | --- | ---: | :---: | :---: | ---: |
-| **CNN from scratch** | 548 258 | **95,36 %** | **95,31 %** | 141,8 s |
-| ResNet18 (transfer learning) | 1 026 | 87,45 % | 87,45 % | 181,0 s |
+| **CNN from scratch** | 548 258 | **96,72 %** | **96,18 %** | 119,9 s |
+| ResNet18 (transfer learning) | 1 026 | 88,66 % | 87,26 % | 165,0 s |
 
 Le CNN from scratch bat le transfer learning ImageNet : la texture de coloration microscopique n'est pas bien représentée dans les features pré-entraînées sur des photos naturelles, un rappel utile face au réflexe "transfer learning toujours gagnant".
 
-### Évaluation clinique (test set, 4 134 images jamais vues, split par image : voir Limites)
+### Évaluation clinique (test set : 4 020 images de 30 patients jamais vus)
 
 | Métrique | Valeur |
 | --- | :---: |
-| Accuracy | 96,13 % |
-| **Sensibilité** (rappel Parasitized) | 94,68 % |
-| Spécificité | 97,58 % |
-| VPP | 97,51 % |
-| VPN | 94,83 % |
-| ROC-AUC | 99,13 % |
+| Accuracy | 96,12 % |
+| **Sensibilité** (rappel Parasitized) | 95,03 % |
+| Spécificité | 97,17 % |
+| VPP | 97,00 % |
+| VPN | 95,31 % |
+| ROC-AUC | 99,14 % |
 
 **Matrice de confusion :**
 
 | | Prédit Parasitized | Prédit Uninfected |
 | --- | :---: | :---: |
-| **Réel Parasitized** | 1 957 (VP) | 110 (FN) |
-| **Réel Uninfected** | 50 (FP) | 2 017 (VN) |
+| **Réel Parasitized** | 1 874 (VP) | 98 (FN) |
+| **Réel Uninfected** | 58 (FP) | 1 990 (VN) |
 
-**Effet de la prévalence sur la VPP** : ce dataset est équilibré 50/50, ce qui n'est pas la prévalence réelle terrain. Une simulation bayésienne à partir de la sensibilité/spécificité mesurées montre qu'à une prévalence de 2 % (dépistage en zone peu endémique), la VPP chute à 44,4 % malgré une ROC-AUC de 99,13 %, un rappel que la performance d'un test dépend du contexte de déploiement, pas seulement du modèle.
+**Effet de la prévalence sur la VPP** : ce dataset est équilibré 50/50, ce qui n'est pas la prévalence réelle terrain. Une simulation bayésienne à partir de la sensibilité/spécificité mesurées montre qu'à une prévalence de 2 % (dépistage en zone peu endémique), la VPP chute à 40,7 % malgré une ROC-AUC de 99,14 %, un rappel que la performance d'un test dépend du contexte de déploiement, pas seulement du modèle.
 
 ---
 
 ## Limites
 
-- **Split au niveau de l'image, pas du patient.** Le dataset regroupe de nombreuses cellules issues des mêmes lames (le nom de fichier encode l'identifiant de lame/patient, par exemple `C100P61ThinF_IMG_…_cell_162.png`). Avec un split aléatoire par image, des cellules d'une même lame se retrouvent à la fois en entraînement et en test : les métriques ci-dessus (accuracy 96,1 %, ROC-AUC 99,1 %) sont donc **probablement optimistes** par rapport à une généralisation à de nouveaux patients. Une évaluation rigoureuse regrouperait les splits par identifiant de patient (`GroupShuffleSplit`) ; ce n'est pas encore fait dans ce dépôt.
-- Sous-échantillon d'entraînement (6 000 / 19 290 images disponibles) pour tenir en temps raisonnable sur CPU : un entraînement sur le train set complet et davantage d'epochs améliorerait probablement encore la marge.
+- **Petit nombre de patients dans le test** : le split est groupé par patient (aucune fuite entre splits), mais le test ne compte que 30 patients ; les métriques n'ont pas d'intervalle de confiance. Un premier split fait au niveau de l'image donnait des résultats quasi identiques (accuracy 96,1 %), ce qui indique que la fuite image/patient n'était pas le moteur de la performance. Les proportions de classes ne sont plus exactement 50/50 dans chaque split (validation 43/57, test 49/51).
+- Sous-échantillon d'entraînement (6 000 / 19 915 images disponibles) pour tenir en temps raisonnable sur CPU : un entraînement sur le train set complet et davantage d'epochs améliorerait probablement encore la marge.
 - Un seul type de microscope et de coloration (dataset Chittagong Medical College Hospital) : aucune validation externe sur d'autres centres, protocoles de coloration ou populations n'a été faite.
 - Prévalence artificiellement équilibrée à 50/50 dans le dataset, contrairement à la prévalence réelle sur le terrain (voir simulation ci-dessus).
 - Un déploiement clinique réel nécessiterait un marquage réglementaire CE-IVD, une validation clinique multicentrique, et positionnerait l'outil en aide au tri / second lecteur pour le technicien de laboratoire, jamais en diagnostic autonome.
