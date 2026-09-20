@@ -83,7 +83,7 @@ Ouvrir et exécuter les notebooks dans l'ordre (01 à 04). Le notebook 02 écrit
 ## Méthodologie
 
 1. **Ingestion et audit qualité** (01) : inventaire des 27 558 images, audit des dimensions/mode, détection de fichiers corrompus et de doublons, balance des classes, échantillon visuel par classe.
-2. **Jeu de données annoté** (02) : split stratifié 70/15/15 (seed fixe), pipeline de prétraitement (resize, normalisation, augmentation sur le train uniquement), manifestes annotés `train.csv` / `val.csv` / `test.csv`.
+2. **Jeu de données annoté** (02) : split stratifié 70/15/15 (seed fixe), **au niveau de l'image et non du patient** (voir Limites), pipeline de prétraitement (resize, normalisation, augmentation sur le train uniquement), manifestes annotés `train.csv` / `val.csv` / `test.csv`.
 3. **État de l'art et modélisation** (03) : comparaison d'un CNN entraîné from scratch et d'un ResNet18 pré-entraîné (transfer learning), sur un sous-échantillon stratifié de 6 000 images d'entraînement pour un temps de calcul raisonnable en CPU (pas de GPU disponible).
 4. **Évaluation clinique et interprétabilité** (04) : indicateurs cliniques (sensibilité, spécificité, VPP, VPN, ROC-AUC, matrice de confusion) sur le test set jamais vu, cartes de saillance pour l'interprétabilité, simulation de l'effet de la prévalence sur la VPP, discussion de la valeur médicale et opérationnelle.
 
@@ -100,7 +100,7 @@ Ouvrir et exécuter les notebooks dans l'ordre (01 à 04). Le notebook 02 écrit
 
 Le CNN from scratch bat le transfer learning ImageNet : la texture de coloration microscopique n'est pas bien représentée dans les features pré-entraînées sur des photos naturelles, un rappel utile face au réflexe "transfer learning toujours gagnant".
 
-### Évaluation clinique (test set, 4 134 images jamais vues)
+### Évaluation clinique (test set, 4 134 images jamais vues, split par image : voir Limites)
 
 | Métrique | Valeur |
 | --- | :---: |
@@ -124,6 +124,7 @@ Le CNN from scratch bat le transfer learning ImageNet : la texture de coloration
 
 ## Limites
 
+- **Split au niveau de l'image, pas du patient.** Le dataset regroupe de nombreuses cellules issues des mêmes lames (le nom de fichier encode l'identifiant de lame/patient, par exemple `C100P61ThinF_IMG_…_cell_162.png`). Avec un split aléatoire par image, des cellules d'une même lame se retrouvent à la fois en entraînement et en test : les métriques ci-dessus (accuracy 96,1 %, ROC-AUC 99,1 %) sont donc **probablement optimistes** par rapport à une généralisation à de nouveaux patients. Une évaluation rigoureuse regrouperait les splits par identifiant de patient (`GroupShuffleSplit`) ; ce n'est pas encore fait dans ce dépôt.
 - Sous-échantillon d'entraînement (6 000 / 19 290 images disponibles) pour tenir en temps raisonnable sur CPU : un entraînement sur le train set complet et davantage d'epochs améliorerait probablement encore la marge.
 - Un seul type de microscope et de coloration (dataset Chittagong Medical College Hospital) : aucune validation externe sur d'autres centres, protocoles de coloration ou populations n'a été faite.
 - Prévalence artificiellement équilibrée à 50/50 dans le dataset, contrairement à la prévalence réelle sur le terrain (voir simulation ci-dessus).
