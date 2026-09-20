@@ -34,7 +34,7 @@ Le projet reproduit les étapes d'une mission de chargé(e) de projet IA/data sc
 malaria-microscopy-deep-learning/
 │
 ├── 01_data_ingestion_eda.ipynb                     # inventaire, audit qualité, EDA
-├── 02_preprocessing_annotated_dataset.ipynb        # split stratifié, pipeline, jeu de données annoté
+├── 02_preprocessing_annotated_dataset.ipynb        # split par patient, pipeline, jeu de données annoté
 ├── 03_baseline_cnn_vs_transfer_learning.ipynb      # état de l'art, CNN from scratch vs transfer learning
 ├── 04_clinical_evaluation_interpretability.ipynb   # indicateurs cliniques, interprétabilité, discussion
 ├── data/                                            # non versionné (voir .gitignore)
