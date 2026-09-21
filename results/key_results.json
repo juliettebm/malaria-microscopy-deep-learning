@@ -1,0 +1,18 @@
+{
+  "scope": "internal test set; 4020 images from 30 held-out patients",
+  "source": "04_clinical_evaluation_interpretability.ipynb",
+  "readme_values": [
+    "96,49 %",
+    "95,08 %",
+    "97,85 %",
+    "97,71 %",
+    "95,38 %",
+    "99,20 %",
+    "0,0285",
+    "0,0075",
+    "1 875 (VP)",
+    "97 (FN)",
+    "44 (FP)",
+    "2 004 (VN)"
+  ]
+}
