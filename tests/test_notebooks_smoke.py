@@ -20,6 +20,7 @@ from malaria_evaluation import (
     patient_bootstrap_ci,
     patient_class_matrix,
 )
+from src.malaria_pipeline import SimpleCNN, ppv_npv_at_prevalence
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -83,7 +84,7 @@ def test_patient_grouping_guardrails_are_present():
 
 
 def test_simple_cnn_accepts_a_synthetic_batch():
-    model = _definition(NOTEBOOKS[2], "SimpleCNN")()
+    model = SimpleCNN()
     output = model(torch.zeros(2, 3, 64, 64))
     assert output.shape == (2, 2)
     assert torch.isfinite(output).all()
@@ -96,8 +97,7 @@ def test_training_uses_the_complete_manifest():
 
 
 def test_prevalence_metrics_smoke_case():
-    metric = _definition(NOTEBOOKS[3], "ppv_npv_at_prevalence")
-    ppv, npv = metric(sensitivity=0.95, specificity=0.97, prevalence=0.02)
+    ppv, npv = ppv_npv_at_prevalence(sensitivity=0.95, specificity=0.97, prevalence=0.02)
     assert ppv == pytest.approx(0.3926, abs=1e-4)
     assert npv == pytest.approx(0.9990, abs=1e-4)
 
