@@ -25,7 +25,7 @@ Le projet reproduit les étapes d'une mission de chargé(e) de projet IA/data sc
 - **Source** : [Malaria Cell Images Dataset](https://data.lhncbc.nlm.nih.gov/public/Malaria/cell_images.zip), National Library of Medicine (NIH, Lister Hill National Center for Biomedical Communications), public.
 - **Taille** : 27 558 images de cellules segmentées issues de frottis sanguins colorés, équilibrées : 13 779 parasitées, 13 779 non infectées.
 - **Label** : chaque image est annotée par des experts en parasitologie du Chittagong Medical College Hospital (Bangladesh).
-- **Qualité** : audit complet (hash MD5 + `PIL.verify()`) sur les 27 558 fichiers, 0 corrompu, 0 doublon après exclusion des fichiers `Thumbs.db` non-image présents dans les dossiers bruts.
+- **Qualité** : audit complet (hash MD5 + `PIL.verify()`) sur les 27 558 fichiers, 0 corrompu, 0 doublon exact (MD5) après exclusion des fichiers `Thumbs.db` non-image présents dans les dossiers bruts. Le hachage MD5 ne détecte pas les quasi-doublons (mêmes cellules recadrées ou recompressées différemment).
 - **Accès** : téléchargement direct depuis le serveur NIH (voir Reproduire). Données brutes et traitées non versionnées (voir `.gitignore`).
 
 ---
@@ -109,7 +109,7 @@ Ces tests sont exécutés automatiquement par GitHub Actions à chaque push et p
 
 1. **Ingestion et audit qualité** (01) : inventaire des 27 558 images, audit des dimensions/mode, détection de fichiers corrompus et de doublons, balance des classes, échantillon visuel par classe.
 2. **Jeu de données annoté** (02) : split 70/15/15 (seed 42) **groupé par patient** (`GroupShuffleSplit`, 200 patients : 140 / 30 / 30, l'identifiant étant lu dans le nom de fichier), pipeline de prétraitement, manifestes `train.csv` / `val.csv` / `test.csv` incluant `patient_id`, manifeste complet `split_manifest.csv` et matrice `patient_class_matrix.csv`.
-3. **État de l'art et modélisation** (03) : comparaison d'un CNN entraîné from scratch et d'un ResNet18 pré-entraîné (transfer learning), sur toutes les images du split d'entraînement.
+3. **État de l'art et modélisation** (03) : comparaison d'un CNN entraîné from scratch et d'un ResNet18 pré-entraîné utilisé comme extracteur gelé (seule la couche finale est entraînée ; pas de fine-tuning), sur toutes les images du split d'entraînement.
 4. **Évaluation clinique et interprétabilité** (04) : indicateurs cliniques avec IC à 95 % par bootstrap de 2 000 rééchantillonnages de patients (seed 42), cartes de saillance, simulation de l'effet de la prévalence sur la VPP et export des prédictions auditables.
 
 ### Matrice patients/classes des splits
@@ -131,42 +131,50 @@ Un même patient peut contribuer aux deux classes ; le total de patients uniques
 
 ### Comparaison des modèles (validation, 8 epochs, CPU)
 
-| Modèle | Paramètres entraînés | Val Accuracy | Val F1 | Temps d'entraînement |
-| --- | ---: | :---: | :---: | ---: |
-| **CNN from scratch** | 548 258 | **96,85 %** | **96,34 %** | 324,9 s |
-| ResNet18 (transfer learning) | 1 026 | 80,02 % | 80,77 % | 418,8 s |
+Le modèle de chaque famille est celui de l'epoch au meilleur **F1 de validation** (classe Parasitized) ; son état est restauré, pas celui de la dernière epoch.
 
-Le CNN from scratch bat le transfer learning ImageNet : la texture de coloration microscopique n'est pas bien représentée dans les features pré-entraînées sur des photos naturelles, un rappel utile face au réflexe "transfer learning toujours gagnant".
+| Modèle | Paramètres entraînés | Epoch retenue | Val Accuracy | Val F1 | Temps d'entraînement |
+| --- | ---: | :---: | :---: | :---: | ---: |
+| **CNN from scratch** | 548 258 | 6 | **96,96 %** | **96,47 %** | 375,0 s |
+| ResNet18 (backbone gelé) | 1 026 | 7 | 94,51 % | 93,75 % | 413,5 s |
+
+Le CNN from scratch devance l'extracteur ResNet18 gelé d'environ 2,5 points d'accuracy. Seul un backbone gelé a été testé (BatchNorm maintenues en mode évaluation) : ce résultat ne permet pas de conclure sur un fine-tuning partiel ou complet. Lors d'une première exécution, les BatchNorm du backbone gelé mettaient encore à jour leurs statistiques ; le ResNet plafonnait alors à 80,02 % et variait beaucoup d'une epoch à l'autre. Cette erreur d'entraînement explique très probablement l'écart, sans en avoir isolé l'effet par une ablation dédiée.
 
 ### Évaluation clinique (test set : 4 020 images de 30 patients jamais vus)
 
+Les prédictions utilisent le seuil cellule **0,1168, gelé sur la validation** pour viser 98 % de sensibilité (et non l'argmax à 0,5). Il n'a pas été ajusté sur le test.
+
 | Métrique | Valeur |
 | --- | :---: |
-| Accuracy | 96,49 % [IC 95 % patient : 95,12–97,62] |
-| **Sensibilité** (rappel Parasitized) | 95,08 % [91,65–97,11] |
-| Spécificité | 97,85 % [97,11–98,49] |
-| VPP | 97,71 % [95,60–98,62] |
-| VPN | 95,38 % [92,88–97,58] |
-| ROC-AUC | 99,20 % [98,68–99,54] |
-| Score de Brier | 0,0285 [0,0200–0,0382] |
+| Accuracy | 93,81 % [IC 95 % patient : 91,37–95,66] |
+| **Sensibilité** (rappel Parasitized) | 98,02 % [96,67–98,86] |
+| Spécificité | 89,75 % [85,65–93,30] |
+| VPP | 90,20 % [83,03–93,87] |
+| VPN | 97,92 % [96,81–98,94] |
+| ROC-AUC | 99,18 % [98,67–99,53] |
+| Score de Brier | 0,0293 [0,0213–0,0387] |
 
-La calibration interne donne une **ECE à 10 intervalles de 0,0075** (plus proche de 0 est meilleur). Ces deux mesures décrivent la qualité des probabilités prédites, mais elles restent estimées sur la même petite cohorte interne de 30 patients et ne remplacent pas une validation externe.
+À titre de comparaison, l'argmax (seuil 0,5) donnerait environ 95,1 % de sensibilité et 97,6 % de spécificité : le seuil gelé échange de la spécificité contre de la sensibilité. La calibration interne donne une **ECE à 10 intervalles de 0,0092** (plus proche de 0 est meilleur). Ces mesures décrivent la qualité des probabilités prédites, mais elles restent estimées sur la même petite cohorte interne de 30 patients et ne remplacent pas une validation externe.
 
 **Matrice de confusion :**
 
 | | Prédit Parasitized | Prédit Uninfected |
 | --- | :---: | :---: |
-| **Réel Parasitized** | 1 875 (VP) | 97 (FN) |
-| **Réel Uninfected** | 44 (FP) | 2 004 (VN) |
+| **Réel Parasitized** | 1 933 (VP) | 39 (FN) |
+| **Réel Uninfected** | 210 (FP) | 1 838 (VN) |
 
-**Effet de la prévalence sur la VPP** : ce dataset est équilibré 50/50, ce qui n'est pas la prévalence réelle terrain. Une simulation bayésienne à partir de la sensibilité/spécificité mesurées montre qu'à une prévalence de 2 % (dépistage en zone peu endémique), la VPP chute à 47,46 % malgré une ROC-AUC de 99,20 %, un rappel que la performance d'un test dépend du contexte de déploiement, pas seulement du modèle.
+**Niveau patient (exploratoire).** Les métriques ci-dessus sont calculées par cellule ; une décision clinique se prend par patient ou par lame. Une règle d'agrégation (au moins 6 cellules suspectes) a été gelée sur la validation, où elle atteignait 100 % de sensibilité et de spécificité. Elle ne généralise pas au test : 20 des 22 patients infectés sont détectés (sensibilité 90,91 %), sans faux positif (spécificité 100 %). Plusieurs patients infectés n'ont que quelques cellules parasitées. Cette règle n'est donc pas une performance démontrée.
+
+**Effet de la prévalence sur la VPP** : ce dataset est équilibré 50/50, ce qui n'est pas la prévalence réelle terrain. Une simulation bayésienne à partir de la sensibilité/spécificité mesurées (au seuil gelé) montre qu'à une prévalence de 2 % (dépistage en zone peu endémique), la VPP chute à 16,32 % (51,5 % à 10 %) malgré une ROC-AUC de 99,18 %, un rappel que la performance d'un test dépend du contexte de déploiement, pas seulement du modèle. Les prévalences de 10 % et 2 % sont hypothétiques, et la simulation suppose que sensibilité et spécificité se transportent telles quelles à une autre population.
 
 ---
 
 ## Limites
 
 - **Petit nombre de patients dans le test** : le split est groupé par patient et les IC à 95 % sont calculés par bootstrap au niveau patient, mais 30 patients restent une petite cohorte. Les proportions de classes ne sont plus exactement 50/50 dans chaque split (validation 43/57, test 49/51).
-- Un seul type de microscope et de coloration (dataset Chittagong Medical College Hospital). La validation externe n'est pas encore exécutée faute de second corpus avec identifiants patient ; le protocole gelé et la commande d'analyse sont fournis dans [`docs/external_validation.md`](docs/external_validation.md).
+- **Aucune généralisation démontrée** : un seul type de microscope, de coloration et d'hôpital (dataset Chittagong Medical College Hospital). La validation externe n'est pas encore exécutée faute de second corpus avec identifiants patient ; le protocole gelé et la commande d'analyse sont fournis dans [`docs/external_validation.md`](docs/external_validation.md).
+- **Seuil et règle patient** : le seuil cellule est gelé sur la validation interne ; la règle d'agrégation par patient est exploratoire et insuffisante au test (voir ci-dessus). Une validation externe exige de garder ce seuil gelé.
+- **Sélection sur le F1 de validation**, la validation étant déséquilibrée (43/57) ; l'accuracy désigne ici le même modèle.
 - Prévalence artificiellement équilibrée à 50/50 dans le dataset, contrairement à la prévalence réelle sur le terrain (voir simulation ci-dessus).
 - Un déploiement clinique réel nécessiterait un marquage réglementaire CE-IVD, une validation clinique multicentrique, et positionnerait l'outil en aide au tri / second lecteur pour le technicien de laboratoire, jamais en diagnostic autonome.
 

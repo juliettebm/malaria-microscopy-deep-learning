@@ -15,12 +15,15 @@ import torch
 import torch.nn as nn
 
 from malaria_evaluation import (
+    aggregate_patient_predictions,
+    select_patient_count_rule,
     calibration_table,
     expected_calibration_error,
     patient_bootstrap_ci,
     patient_class_matrix,
 )
 from src.malaria_pipeline import SimpleCNN, ppv_npv_at_prevalence
+from src.malaria_pipeline import keep_frozen_batchnorm_in_eval, select_threshold_for_sensitivity
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -95,6 +98,39 @@ def test_training_uses_the_complete_manifest():
     assert "train_df = train_full.reset_index(drop=True)" in training
     assert "train_df.groupby" not in training
 
+
+def test_frozen_batchnorm_stays_in_evaluation_mode():
+    model = nn.Sequential(nn.BatchNorm2d(3), nn.Conv2d(3, 2, 1))
+    for parameter in model[0].parameters():
+        parameter.requires_grad = False
+    model.train()
+    keep_frozen_batchnorm_in_eval(model)
+    assert model[0].training is False
+    assert model[1].training is True
+
+
+def test_threshold_and_patient_aggregation_are_explicit():
+    selected = select_threshold_for_sensitivity(
+        [0, 0, 1, 1], [0.1, 0.4, 0.7, 0.9], target_sensitivity=1.0
+    )
+    assert selected["threshold"] == pytest.approx(0.7)
+    cells = pd.DataFrame(
+        {"patient_id": ["p1", "p1", "p2"], "y_true": [1, 1, 0], "y_prob": [0.8, 0.2, 0.1]}
+    )
+    patients = aggregate_patient_predictions(cells, threshold=0.7, min_suspicious_cells=1)
+    assert patients.set_index("patient_id").loc["p1", "y_pred"] == 1
+
+
+def test_patient_rule_prefers_least_strict_among_ties():
+    cells = pd.DataFrame(
+        {
+            "patient_id": ["p1"] * 6 + ["n1"],
+            "y_true": [1] * 6 + [0],
+            "y_prob": [0.9] * 6 + [0.1],
+        }
+    )
+    rule = select_patient_count_rule(cells, threshold=0.5, target_sensitivity=1.0)
+    assert rule["min_suspicious_cells"] == 1
 
 def test_prevalence_metrics_smoke_case():
     ppv, npv = ppv_npv_at_prevalence(sensitivity=0.95, specificity=0.97, prevalence=0.02)

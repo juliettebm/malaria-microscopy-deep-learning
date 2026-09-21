@@ -4,13 +4,14 @@ from __future__ import annotations
 import hashlib
 import io
 import time
+from copy import deepcopy
 from pathlib import Path
 
 import numpy as np
 import torch
 import torch.nn as nn
 from PIL import Image
-from sklearn.metrics import accuracy_score, f1_score
+from sklearn.metrics import accuracy_score, confusion_matrix, f1_score
 from torch.utils.data import Dataset
 
 LABEL_TO_IDX = {"Uninfected": 0, "Parasitized": 1}
@@ -80,7 +81,7 @@ class SimpleCNN(nn.Module):
 
 
 def build_resnet18_transfer(num_classes: int = 2, *, pretrained: bool = True):
-    """Build ResNet-18 with a new classification head and optional frozen backbone."""
+    """Build a ResNet-18 feature extractor with a trainable classification head."""
     from torchvision import models
 
     weights = models.ResNet18_Weights.IMAGENET1K_V1 if pretrained else None
@@ -90,6 +91,15 @@ def build_resnet18_transfer(num_classes: int = 2, *, pretrained: bool = True):
             parameter.requires_grad = False
     model.fc = nn.Linear(model.fc.in_features, num_classes)
     return model
+
+
+def keep_frozen_batchnorm_in_eval(model):
+    """Prevent frozen BatchNorm layers from updating running statistics."""
+    for module in model.modules():
+        if isinstance(module, nn.modules.batchnorm._BatchNorm):
+            parameters = list(module.parameters(recurse=False))
+            if parameters and not any(parameter.requires_grad for parameter in parameters):
+                module.eval()
 
 
 def evaluate_model(model, loader, device, positive_index: int = 1):
@@ -112,13 +122,16 @@ def evaluate_model(model, loader, device, positive_index: int = 1):
 
 
 def train_model(model, train_loader, val_loader, epochs, lr, name, device, positive_index=1):
-    """Train a classifier and return its epoch history and elapsed seconds."""
+    """Train, select on validation F1, and restore the best model state."""
     optimizer = torch.optim.Adam(filter(lambda p: p.requires_grad, model.parameters()), lr=lr)
     criterion = nn.CrossEntropyLoss()
     history = {"train_loss": [], "train_acc": [], "val_loss": [], "val_acc": [], "val_f1": []}
+    best_state = deepcopy(model.state_dict())
+    best_epoch, best_val_f1 = 0, -np.inf
     started = time.time()
     for epoch in range(1, epochs + 1):
         model.train()
+        keep_frozen_batchnorm_in_eval(model)
         running_loss, predictions, labels = 0.0, [], []
         for inputs, targets in train_loader:
             inputs, targets = inputs.to(device), targets.to(device)
@@ -136,9 +149,45 @@ def train_model(model, train_loader, val_loader, epochs, lr, name, device, posit
         history["val_loss"].append(val_loss)
         history["val_acc"].append(val_acc)
         history["val_f1"].append(val_f1)
+        if val_f1 > best_val_f1:
+            best_epoch, best_val_f1 = epoch, val_f1
+            best_state = deepcopy(model.state_dict())
         print(f"[{name}] epoch {epoch}/{epochs} - val_loss {val_loss:.4f} val_acc {val_acc:.4f} val_f1 {val_f1:.4f}")
     elapsed = time.time() - started
+    model.load_state_dict(best_state)
+    history["best_epoch"] = best_epoch
+    history["best_val_f1"] = best_val_f1
     return history, elapsed
+
+
+def predict_probabilities(model, loader, device, positive_index: int = 1):
+    """Return labels and positive-class probabilities in loader order."""
+    model.eval()
+    labels, probabilities = [], []
+    with torch.no_grad():
+        for inputs, targets in loader:
+            logits = model(inputs.to(device))
+            probabilities.extend(torch.softmax(logits, dim=1)[:, positive_index].cpu().numpy())
+            labels.extend(targets.numpy())
+    return np.asarray(labels), np.asarray(probabilities)
+
+
+def select_threshold_for_sensitivity(y_true, y_prob, target_sensitivity: float = 0.98):
+    """Maximise specificity while meeting a predeclared validation sensitivity."""
+    y_true, y_prob = np.asarray(y_true), np.asarray(y_prob)
+    candidates = np.unique(np.r_[0.0, y_prob, 1.0])
+    feasible = []
+    for threshold in candidates:
+        prediction = (y_prob >= threshold).astype(int)
+        tn, fp, fn, tp = confusion_matrix(y_true, prediction, labels=[0, 1]).ravel()
+        sensitivity = tp / (tp + fn) if tp + fn else np.nan
+        specificity = tn / (tn + fp) if tn + fp else np.nan
+        if sensitivity >= target_sensitivity:
+            feasible.append((specificity, threshold, sensitivity))
+    if not feasible:
+        raise ValueError("No threshold satisfies the requested sensitivity")
+    specificity, threshold, sensitivity = max(feasible)
+    return {"threshold": float(threshold), "sensitivity": float(sensitivity), "specificity": float(specificity)}
 
 
 def ppv_npv_at_prevalence(sensitivity, specificity, prevalence):

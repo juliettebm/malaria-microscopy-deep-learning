@@ -125,3 +125,43 @@ def patient_class_matrix(split_manifest: pd.DataFrame) -> pd.DataFrame:
         .sort_values(["split", "label"])
         .reset_index(drop=True)
     )
+
+
+def aggregate_patient_predictions(
+    predictions: pd.DataFrame, *, threshold: float, min_suspicious_cells: int
+) -> pd.DataFrame:
+    """Aggregate cell probabilities into one decision per patient."""
+    frame = predictions.copy()
+    frame["suspicious"] = frame["y_prob"] >= threshold
+    patients = (
+        frame.groupby("patient_id", sort=False)
+        .agg(y_true=("y_true", "max"), suspicious_cells=("suspicious", "sum"), y_prob=("y_prob", "max"))
+        .reset_index()
+    )
+    patients["y_pred"] = (patients["suspicious_cells"] >= min_suspicious_cells).astype(int)
+    return patients
+
+
+def select_patient_count_rule(
+    predictions: pd.DataFrame, *, threshold: float, target_sensitivity: float = 0.98
+) -> dict[str, float | int]:
+    """Select the least strict cell-count rule with the best validation specificity."""
+    max_count = int(predictions.groupby("patient_id").size().max())
+    feasible = []
+    for minimum in range(1, max_count + 1):
+        patients = aggregate_patient_predictions(
+            predictions, threshold=threshold, min_suspicious_cells=minimum
+        )
+        metrics = classification_metrics(patients.y_true, patients.y_pred, patients.y_prob)
+        if metrics["sensitivity"] >= target_sensitivity:
+            feasible.append((metrics["specificity"], minimum, metrics["sensitivity"]))
+    if not feasible:
+        raise ValueError("No patient aggregation rule satisfies the requested sensitivity")
+    # Parmi les regles a specificite egale, garder la moins stricte : la plus
+    # stricte se situe au bord du plateau et generalise moins bien.
+    specificity, minimum, sensitivity = max(feasible, key=lambda item: (item[0], -item[1]))
+    return {
+        "min_suspicious_cells": int(minimum),
+        "sensitivity": float(sensitivity),
+        "specificity": float(specificity),
+    }
